@@ -5,6 +5,8 @@ and as allowed by the Creative Common Attribution-NonCommercial-ShareAlike 3.0
 Unported License (https://creativecommons.org/licenses/by-nc-sa/3.0/).
 """
 from SymbolTable import SymbolTable, ARG, LOCAL, FIELD, STATIC
+from JackTokenizer import JackTokenizer, KEYWORD, SYMBOL, IDENTIFIER,\
+    INT_CONST, STRING
 
 """
 REMEMBER  - EACH FUNCTION **ONLY** ADVANCE IN ITS END!
@@ -397,10 +399,22 @@ class CompilationEngine:
                 self.output_file.write(dict_tag_open[self.jt.token_type()] +
                                        self.jt.get_cur_token()[1:-1] +
                                        dict_tag_close[self.jt.token_type()]
-                                       + LINE)
+                                       + LINE)                              #TODO: THE BIGGEST ELEPHANT TAIL
             else:
-                self.tags()
-            self.advance()
+                # self.tags()
+                type_term = self.jt.token_type()
+                cur_token = self.jt.get_cur_token()
+                if type_term == INT_CONST:
+                    self.vm.write_push("constant",self.jt.get_cur_token())
+                    self.advance()
+                elif type_term == IDENTIFIER:
+                    self.advance()
+                    if cur_token != "(" or cur_token != "." or \
+                            cur_token != "[":
+                        self.vm.write_push(self.st.kind_of(cur_token),
+                                           self.st.index_of(cur_token))
+                else:
+                    self.advance()
 
             if self.jt.get_cur_token() == "[":
                 # Write "[" Symbol
