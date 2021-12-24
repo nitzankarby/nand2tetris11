@@ -4,6 +4,7 @@ https://www.nand2tetris.org (Shimon Schocken and Noam Nisan, 2017)
 and as allowed by the Creative Common Attribution-NonCommercial-ShareAlike 3.0 
 Unported License (https://creativecommons.org/licenses/by-nc-sa/3.0/).
 """
+from SymbolTable import SymbolTable, ARG, LOCAL, FIELD, STATIC
 
 """
 REMEMBER  - EACH FUNCTION **ONLY** ADVANCE IN ITS END!
@@ -11,7 +12,13 @@ REMEMBER  - EACH FUNCTION **ONLY** ADVANCE IN ITS END!
 
 import typing
 import JackTokenizer as JT
+import VMWriter as vm
 
+enum = {
+    "constructor": 0,
+    "method": 1,
+    "function": 2
+}
 dict_tag_open = {"CLASS": "<class>",
                  "KEYWORD": "<keyword> ",
                  "SYMBOL": "<symbol> ",
@@ -19,6 +26,22 @@ dict_tag_open = {"CLASS": "<class>",
                  "classVarDec": "<classVarDec> ",
                  "INT_CONST": "<integerConstant> ",
                  "STRING_CONST": "<stringConstant> "}
+
+un_operation_dict = {
+    "-": "NEG",
+    "^": "SHIFTLEFT",
+    "#": "SHFITRIGHT"
+}
+
+operation_dict = {
+    "-": "SUB",
+    "+": "ADD",
+    "=": "EQ",
+    ">": "GT",
+    "<": "LT",
+    "&": "AND",
+    "|": "OR"
+}
 
 dict_tag_close = {"CLASS": "</class>",
                   "KEYWORD": " </keyword>",
@@ -47,6 +70,8 @@ class CompilationEngine:
         """
         self.jt = jack_tokenizer
         self.output_file = output_stream
+        self.vm = vm.VMWriter(output_stream)
+        self.class_name = None
         self.dict_compile_func = {"class": self.compile_class,
                                   "field": self.compile_class_var_dec,
                                   "static": self.compile_class_var_dec,
@@ -59,14 +84,15 @@ class CompilationEngine:
                                   "if": self.compile_if,
                                   "while": self.compile_while,
                                   "return": self.compile_return}
+        self.st = SymbolTable()
+
+    def write_constructor(self):
+        arg_num = self.st.var_count(FIELD)
+        self.vm.write_push("constant", arg_num)
+        self.vm.write_call("Memory.alloc", 1)
 
     def advance(self):
         self.jt.advance()
-
-    def tags(self):
-        self.output_file.write(dict_tag_open[self.jt.token_type()] +
-                               self.jt.get_cur_token() +
-                               dict_tag_close[self.jt.token_type()] + LINE)
 
     def __check_block(self):
         """Check Next Statement """
@@ -78,79 +104,74 @@ class CompilationEngine:
                 if self.jt.token_type() == "KEYWORD":
                     self.dict_compile_func[self.jt.keyword()]()
 
-
     def compile_class(self) -> None:
         """Compiles a complete class."""
-        self.output_file.write("<class>" + LINE)
-        # Writes Class - keyword
-        self.tags()
         self.jt.advance()
 
         # Writes Identifier - className
-        self.tags()
+        self.class_name = self.jt.get_cur_token()
         self.jt.advance()
 
-        #Writes { - symbol
-        self.tags()
+        # Writes { - symbol
         self.jt.advance()
 
         self.__check_block()
 
-        #Writes } - symbol
-        self.tags()
+        # Writes } - symbol
         self.jt.advance()
-
-        self.output_file.write("</class>" + LINE)
 
     def compile_class_var_dec(self) -> None:
         """Compiles a static declaration or a field declaration."""
-        self.output_file.write("<classVarDec>" + LINE)
         # Writes class variable-static or field - keyword
-        self.tags()
+        obj_kind = self.jt.keyword()  # sets the objects kind
         self.jt.advance()
+        obj_type = self.jt.token_type()  # sets the objects type
         while self.jt.has_more_tokens():
             if self.jt.symbol() == ";":
                 # Writes ; - symbol
-                self.tags()
                 break
+            if self.jt.get_cur_token() == ",":
+                continue
             else:
-                self.tags()
+                obj_name = self.jt.get_cur_token()
+                self.st.define(obj_name, obj_type, obj_kind)  # writes the object to the symbol table
                 self.jt.advance()
 
         self.jt.advance()
-        self.output_file.write("</classVarDec>\n")
 
     def compile_subroutine(self) -> None:
         """Compiles a complete method, function, or constructor."""
-        # Your code goes here!
-        self.output_file.write("<subroutineDec>" + LINE)
+        # Our code goes here!
+        self.st.start_subroutine()
         # Writed function/method/constructor - keyword
-        self.tags()
+        method_type = self.jt.get_cur_token()
         self.jt.advance()
 
         # Writes return type (keyword)
-        self.tags()
         self.jt.advance()
 
         # Writed func_name (identifier)
-        self.tags()
+        func_name = self.jt.get_cur_token()
         self.jt.advance()
 
         # Open bracket of func
-        self.tags()
         self.jt.advance()
 
-        self.compile_parameter_list()
+        if method_type == "constructor":
+            self.compile_parameter_list(method_type)
+            self.write_constructor()
 
-        # Closed bracket of func ")"
-        self.tags()
+        elif method_type == "method":
+            self.compile_parameter_list(method_type)
+            self.vm.write_push("argument", 0)
+            self.vm.write_pop("pointer", 0)
+        else:
+            self.compile_parameter_list(method_type)
 
         self.advance()
         # OPEN SubroutineBody
-        self.output_file.write("<subroutineBody>" + LINE)
 
-        # Open Curly Bracket
-        self.tags()
+        # start func body (passed '{' )
         self.advance()
         while self.jt.get_cur_token() == 'var':
             self.compile_var_dec()
@@ -159,96 +180,80 @@ class CompilationEngine:
         self.compile_statements()
 
         # Closed Curly Bracket
-        self.tags()
-
         self.jt.advance()
-        self.output_file.write("</subroutineBody>" + LINE)
 
-        self.output_file.write("</subroutineDec>" + LINE)
-
-
-    def compile_parameter_list(self) -> None:
+    def compile_parameter_list(self, calli_type) -> None:
         """Compiles a (possibly empty) parameter list, not including the 
         enclosing "()".
         """
-        self.output_file.write("<parameterList>" + LINE)
+        if calli_type == "method":  # TODO: Daniels elephant tail.
+            self.st.define("this", self.class_name, ARG)
         if self.jt.get_cur_token() == ")":
-            self.output_file.write("</parameterList>" + LINE)
             return
 
         while self.jt.has_more_tokens():
             if self.jt.symbol() == ")":
                 break
             else:
-                self.output_file.write(
-                    dict_tag_open[f"{self.jt.token_type()}"] +
-                    f"{self.jt.get_cur_token()}"
-                    f"{dict_tag_close[self.jt.token_type()]}"
-                    f"{LINE}")
+                if self.jt.get_cur_token() == ",":
+                    continue
+                else:
+                    token_type = self.jt.get_cur_token()
+                    self.jt.advance()
+                    token_name = self.jt.get_cur_token()
+                    self.st.define(token_name, token_type, ARG)
                 self.jt.advance()
-        self.output_file.write("</parameterList>" + LINE)
 
     def compile_var_dec(self) -> None:
         """Compiles a var declaration."""
-        self.output_file.write("<varDec>" + LINE)
-        # Writes "var"
-        self.tags()
-
+        # token = "var"
         self.jt.advance()
         while self.jt.has_more_tokens():
             if self.jt.symbol() == ";":
-                self.tags()
                 break
+            elif self.jt.get_cur_token() == ",":
+                continue
             else:
-                self.tags()
-                self.jt.advance()
-
+                token_type = self.jt.token_type()
+                self.advance()
+                token_name = self.jt.get_cur_token()
+                self.st.define(token_name, token_type, LOCAL)
+                self.advance()
         self.jt.advance()
-        self.output_file.write("</varDec>" + LINE)
 
     def compile_statements(self) -> None:
         """Compiles a sequence of statements, not including the enclosing 
         "{}".
         """
-        self.output_file.write("<statements>" + LINE)
-
         self.__check_block()
-        self.output_file.write("</statements>" + LINE)
-
 
     def compile_do(self) -> None:
         """Compiles a do statement."""
-        self.output_file.write("<doStatement>" + LINE)
         # Write "do"
-        self.tags()
         self.advance()
 
         # Put subroutine or className|varName name - identifier
-        self.tags()
-
+        caller_name = self.jt.get_cur_token()
         self.advance()
         while self.jt.get_cur_token() == ".":
             # Put '.'
-            self.tags()
+            caller_name += "."
             self.advance()
 
             # put subroutineCall - identifier
-            self.tags()
+            caller_name += self.jt.get_cur_token()
             self.advance()
 
         # Write symbol "("
-        self.tags()
         self.advance()
 
         # if self.jt.get_cur_token() != ")":
-        self.compile_expression_list()
+        param_count = self.compile_expression_list()
 
         # writes symbol ")"
-        self.tags()
         self.advance()
-
+        self.vm.write_call(caller_name, param_count)
         # writes symbol ";"
-        self.tags()
         self.advance()
 
         self.output_file.write("</doStatement>" + LINE)
@@ -350,7 +355,6 @@ class CompilationEngine:
 
     def compile_expression(self) -> None:
         """Compiles an expression."""
-        self.output_file.write("<expression>" + LINE)
         self.compile_term()
         while self.jt.get_cur_token() != ")" and \
                 self.jt.get_cur_token() != "]" and \
@@ -362,8 +366,6 @@ class CompilationEngine:
 
             self.compile_term()
 
-        self.output_file.write("</expression>" + LINE)
-
     def compile_term(self) -> None:
         """Compiles a term. 
         This routine is faced with a slight difficulty when
@@ -374,23 +376,19 @@ class CompilationEngine:
         to distinguish between the three possibilities. Any other token is not
         part of this term and should not be advanced over.
         """
-        self.output_file.write("<term>" + LINE)
-
         # Write the first part of the term
         if self.jt.get_cur_token() in UNARY_OP:
             # Write Unary-OP (symbol)
-            self.tags()
+            unary_op = self.jt.get_cur_token()
             self.advance()
             self.compile_term()
+            self.vm.write_arithmetic(un_operation_dict[unary_op])
 
         elif self.jt.get_cur_token() == "(":
             # Write "(" Symbol
-            self.tags()
             self.advance()
             self.compile_expression()
-
             # Write ")" Symbol
-            self.tags()
             self.advance()
         else:
             # Write stringConstant\intConstant\keywordConstant\varName\
@@ -442,22 +440,19 @@ class CompilationEngine:
 
         self.output_file.write("</term>" + LINE)
 
-    def compile_expression_list(self) -> None:
+    def compile_expression_list(self):
         """Compiles a (possibly empty) comma-separated list of expressions."""
-
-        # WE ALREADY ADVANCED BEFORE AND AFTER!!
-        self.output_file.write("<expressionList>" + LINE)
+        param_count = 0
         if self.jt.get_cur_token() != ')':
             self.compile_expression()
             while self.jt.get_cur_token() == ',':
                 # Write ','
-                self.tags()
                 self.advance()
 
                 self.compile_expression()
 
         # self.jt.advance()
-        self.output_file.write("</expressionList>" + LINE)
+        return param_count
 
     def compile_else(self):
         # writes "else"

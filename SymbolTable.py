@@ -6,6 +6,11 @@ Unported License (https://creativecommons.org/licenses/by-nc-sa/3.0/).
 """
 import typing
 
+STATIC = "static"
+FIELD = "this"  # todo: the same elephant
+ARG = "argument"
+LOCAL = "local"
+
 
 class SymbolTable:
     """A symbol table that associates names with information needed for Jack
@@ -15,15 +20,21 @@ class SymbolTable:
 
     def __init__(self) -> None:
         """Creates a new empty symbol table."""
-        # Your code goes here!
-        pass
+        self.kind_dict = {
+            STATIC: 0,
+            FIELD: 0,
+            ARG: 0,
+            LOCAL: 0
+        }
+        self.class_dict = {}  # keys : names , values : array of [type, kind, index]
+        self.subroutine_dict = {}
 
     def start_subroutine(self) -> None:
         """Starts a new subroutine scope (i.e., resets the subroutine's 
         symbol table).
         """
-        # Your code goes here!
-        pass
+        self.kind_dict[ARG], self.kind_dict[LOCAL] = 0, 0
+        self.subroutine_dict = {}
 
     def define(self, name: str, type: str, kind: str) -> None:
         """Defines a new identifier of a given name, type and kind and assigns 
@@ -36,8 +47,11 @@ class SymbolTable:
             kind (str): the kind of the new identifier, can be:
             "STATIC", "FIELD", "ARG", "VAR".
         """
-        # Your code goes here!
-        pass
+        self.kind_dict[kind] += 1
+        if type in [STATIC, FIELD]:
+            self.class_dict[name] = [type, kind, self.kind_dict[kind]]
+        else:
+            self.subroutine_dict[name] = [type, kind, self.kind_dict[kind]]
 
     def var_count(self, kind: str) -> int:
         """
@@ -48,10 +62,9 @@ class SymbolTable:
             int: the number of variables of the given kind already defined in 
             the current scope.
         """
-        # Your code goes here!
-        pass
+        return self.kind_dict[kind]
 
-    def kind_of(self, name: str) -> str:
+    def kind_of(self, name: str):
         """
         Args:
             name (str): name of an identifier.
@@ -60,10 +73,9 @@ class SymbolTable:
             str: the kind of the named identifier in the current scope, or None
             if the identifier is unknown in the current scope.
         """
-        # Your code goes here!
-        pass
+        return self.get_value(name, 1)
 
-    def type_of(self, name: str) -> str:
+    def type_of(self, name: str):
         """
         Args:
             name (str):  name of an identifier.
@@ -71,8 +83,7 @@ class SymbolTable:
         Returns:
             str: the type of the named identifier in the current scope.
         """
-        # Your code goes here!
-        pass
+        return self.get_value(name, 0)
 
     def index_of(self, name: str) -> int:
         """
@@ -82,5 +93,19 @@ class SymbolTable:
         Returns:
             int: the index assigned to the named identifier.
         """
-        # Your code goes here!
-        pass
+        return self.get_value(name, 2)
+
+    def get_value(self, name, value_index):
+        """
+        Args:
+            name(str):  name of an identifier.
+            value_index(int): location of desired data in the dictionary index
+        returns:
+            data (str) as located in the dictionary
+        """
+        if self.class_dict.get(name):
+            return self.class_dict[name][value_index]
+        elif self.subroutine_dict.get(name):
+            return self.subroutine_dict[name][value_index]
+        else:
+            return None
