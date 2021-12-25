@@ -178,6 +178,10 @@ class JackTokenizer:
         """ Return current token"""
         return self.parsed_text[self.token_counter]
 
+    def take_one_step_back(self):
+        if self.token_counter > 0:
+            self.token_counter -= 1
+
     def string_comment_checker(self, line):
         all_quotes = [x.start() for x in re.finditer("\"", line)]
         all_backslash = [x.start() for x in re.finditer("//|/\*", line)]

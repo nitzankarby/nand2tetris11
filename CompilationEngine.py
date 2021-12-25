@@ -5,7 +5,7 @@ and as allowed by the Creative Common Attribution-NonCommercial-ShareAlike 3.0
 Unported License (https://creativecommons.org/licenses/by-nc-sa/3.0/).
 """
 from SymbolTable import SymbolTable, ARG, LOCAL, FIELD, STATIC
-from JackTokenizer import JackTokenizer, KEYWORD, SYMBOL, IDENTIFIER,\
+from JackTokenizer import JackTokenizer, KEYWORD, SYMBOL, IDENTIFIER, \
     INT_CONST, STRING
 
 """
@@ -72,6 +72,8 @@ class CompilationEngine:
         """
         self.jt = jack_tokenizer
         self.output_file = output_stream
+        self.if_counter = 0
+        self.while_count = 0
         self.vm = vm.VMWriter(output_stream)
         self.class_name = None
         self.dict_compile_func = {"class": self.compile_class,
@@ -86,6 +88,11 @@ class CompilationEngine:
                                   "if": self.compile_if,
                                   "while": self.compile_while,
                                   "return": self.compile_return}
+        self.math_operation_dict = {
+            "*": "Math.multiply",
+            "/": "Math.divide"
+        }
+
         self.st = SymbolTable()
 
     def write_constructor(self):
@@ -145,30 +152,28 @@ class CompilationEngine:
         """Compiles a complete method, function, or constructor."""
         # Our code goes here!
         self.st.start_subroutine()
-        # Writed function/method/constructor - keyword
+        # Written function/method/constructor - keyword
         method_type = self.jt.get_cur_token()
         self.jt.advance()
 
         # Writes return type (keyword)
         self.jt.advance()
 
-        # Writed func_name (identifier)
-        func_name = self.jt.get_cur_token()
+        # Written func_name (identifier)
+        func_name = self.class_name + "." + self.jt.get_cur_token()
         self.jt.advance()
 
         # Open bracket of func
         self.jt.advance()
+        n_args = self.compile_parameter_list(method_type)
+        self.vm.write_function(func_name, n_args)
 
         if method_type == "constructor":
-            self.compile_parameter_list(method_type)
             self.write_constructor()
 
         elif method_type == "method":
-            self.compile_parameter_list(method_type)
             self.vm.write_push("argument", 0)
             self.vm.write_pop("pointer", 0)
-        else:
-            self.compile_parameter_list(method_type)
 
         self.advance()
         # OPEN SubroutineBody
@@ -184,7 +189,7 @@ class CompilationEngine:
         # Closed Curly Bracket
         self.jt.advance()
 
-    def compile_parameter_list(self, calli_type) -> None:
+    def compile_parameter_list(self, calli_type):
         """Compiles a (possibly empty) parameter list, not including the 
         enclosing "()".
         """
@@ -205,6 +210,7 @@ class CompilationEngine:
                     token_name = self.jt.get_cur_token()
                     self.st.define(token_name, token_type, ARG)
                 self.jt.advance()
+        return self.st.var_count(ARG)
 
     def compile_var_dec(self) -> None:
         """Compiles a var declaration."""
@@ -258,102 +264,91 @@ class CompilationEngine:
         # writes symbol ";"
         self.advance()
 
-        self.output_file.write("</doStatement>" + LINE)
-
     def compile_let(self) -> None:
         """Compiles a let statement."""
-        self.output_file.write("<letStatement>" + LINE)
-        # Writes 'let' - keyword
-        self.tags()
-
+        # 'let' - keyword
         self.advance()
-        # Writes 'varName' - identifier
-        self.tags()
+        # 'varName' - identifier
+        var_name = self.jt.get_cur_token()
         self.advance()
 
         if self.jt.get_cur_token() == "[":
-            # Writes '[' - symbol
-            self.tags()
+            #  '[' - symbol
             self.advance()
-
             self.compile_expression()
-
-            # Writes ']' - symbol
-            self.tags()
+            #  ']' - symbol
             self.advance()
-
-        # writes '=' - symbol
-        self.tags()
+        # navigation to var pointer plus the location (memory navigation)
+        self.vm.write_push(self.st.kind_of(var_name),
+                           self.st.index_of(var_name))  # assuming the last pushed value is an int constant
+        self.output_file.write(operation_dict["+"])  # getting the right location
+        #  '=' - symbol
         self.advance()
         self.compile_expression()
-
-        # Writes ';' - symbol
-        self.tags()
+        self.vm.write_pop("temp", 0)
+        self.vm.write_pop("pointer", 1)
+        self.vm.write_push("temp", 0)
+        self.vm.write_pop("that", 0)
+        # end of line (;)
         self.advance()
-
-        self.output_file.write("</letStatement>" + LINE)
 
     def compile_while(self) -> None:
         """Compiles a while statement."""
-        self.output_file.write("<whileStatement>" + LINE)
-        # writes the 'while' itself
-        self.tags()
+        self.while_count += 1
+        #  the 'while' itself
         self.advance()
-        # writes '('
-        self.tags()
+        #  '('
         self.advance()
-
+        self.vm.write_label(f"while_label.{self.while_count}")
         self.compile_expression()
-
+        self.vm.write_arithmetic("NEG")
+        self.vm.write_if(f"while_label_2.{self.while_count}")
         # writes ')'
-        self.tags()
         self.advance()
         # writes '{'
-        self.tags()
         self.advance()
         self.compile_statements()
+        self.vm.write_goto(f"while_label.{self.while_count}")
         # writes "}"
-        self.tags()
         self.advance()
-        self.output_file.write("</whileStatement>" + LINE)
+        self.vm.write_label(f"while_label_2.{self.while_count}")
 
     def compile_return(self) -> None:
         """Compiles a return statement."""
-        self.output_file.write("<returnStatement>" + LINE)
-        self.tags()
         self.jt.advance()
         if self.jt.get_cur_token() != ";":
             self.compile_expression()
-
+            self.vm.write_return()
+        else:
+            self.vm.write_push("constant", 0)
+            self.vm.write_return()
+            self.vm.write_pop("temp", 0)
         # The ';' symbol
-        self.tags()
         self.advance()
-        self.output_file.write("</returnStatement>" + LINE)
 
     def compile_if(self) -> None:
         """Compiles a if statement, possibly with a trailing else clause."""
-        self.output_file.write("<ifStatement>" + LINE)
-        # writes the 'if' itself
-        self.tags()
+        self.if_counter += 1
+        #  the 'if' itself
         self.advance()
-        # writes '('
-        self.tags()
+        #  '('
         self.advance()
         self.compile_expression()
-
-        # writes ')'
-        self.tags()
+        self.vm.write_arithmetic("NEG")
+        self.vm.write_if(f"label.{self.if_counter}")
+        #  ')'
         self.advance()
-        # writes '{'
-        self.tags()
+        #  '{'
         self.advance()
         self.compile_statements()
-        # writes "}"
-        self.tags()
+        #  "}"
         self.advance()
+        self.vm.write_goto(f"label_2.{self.if_counter}")
+        self.vm.write_label(f"label.{self.if_counter}")
         if self.jt.get_cur_token() == "else":
             self.compile_else()
-        self.output_file.write("</ifStatement>" + LINE)
+
+        self.vm.write_label(f"label_2.{self.if_counter}")
 
     def compile_expression(self) -> None:
         """Compiles an expression."""
@@ -363,9 +358,12 @@ class CompilationEngine:
                 self.jt.get_cur_token() != "," and \
                 self.jt.get_cur_token() != ";":
             # OP symbol
-            self.tags()
+            if self.jt.get_cur_token() in self.math_operation_dict.keys():
+                self.vm.write_call(self.math_operation_dict[self.jt.get_cur_token()], 2)
+            else:
+                self.vm.write_arithmetic(operation_dict[self.jt.get_cur_token()])
             self.advance()
-
+            # make sure a push is happening
             self.compile_term()
 
     def compile_term(self) -> None:
@@ -379,6 +377,9 @@ class CompilationEngine:
         part of this term and should not be advanced over.
         """
         # Write the first part of the term
+        # TODO: in case of info loss. may need to add advance calls
+        type_term = self.jt.token_type()
+        cur_token = self.jt.get_cur_token()
         if self.jt.get_cur_token() in UNARY_OP:
             # Write Unary-OP (symbol)
             unary_op = self.jt.get_cur_token()
@@ -391,68 +392,73 @@ class CompilationEngine:
             self.advance()
             self.compile_expression()
             # Write ")" Symbol
-            self.advance()
+
         else:
             # Write stringConstant\intConstant\keywordConstant\varName\
-            # subroutineCall - DO NOT CHANGE HERE!!!
             if self.jt.token_type() == JT.STRING:
-                self.output_file.write(dict_tag_open[self.jt.token_type()] +
-                                       self.jt.get_cur_token()[1:-1] +
-                                       dict_tag_close[self.jt.token_type()]
-                                       + LINE)                              #TODO: THE BIGGEST ELEPHANT TAIL
-            else:
-                # self.tags()
-                type_term = self.jt.token_type()
-                cur_token = self.jt.get_cur_token()
-                if type_term == INT_CONST:
-                    self.vm.write_push("constant",self.jt.get_cur_token())
-                    self.advance()
-                elif type_term == IDENTIFIER:
-                    self.advance()
-                    if cur_token != "(" or cur_token != "." or \
-                            cur_token != "[":
-                        self.vm.write_push(self.st.kind_of(cur_token),
-                                           self.st.index_of(cur_token))
+                cur_string = self.jt.get_cur_token()[1:-1]
+                self.vm.write_push("constant", len(cur_string))
+                self.vm.write_call("String.new", 1)
+                for i in range(len(cur_string)):
+                    self.vm.write_push("constant", ord(cur_string[i]))
+                    self.vm.write_call("String.appendChar", 2)
+                    # ToDo: daniel will check the code block in his free time
+            elif type_term == INT_CONST:
+                self.vm.write_push("constant", self.jt.get_cur_token())
+
+            elif type_term == KEYWORD:
+                if cur_token == "true":
+                    self.vm.write_push("constant", 1)
+                    self.vm.write_arithmetic("NEG")
+                elif cur_token == "this":
+                    self.vm.write_push("pointer", 0)
                 else:
+                    self.vm.write_push("constant", 0)
+
+            elif type_term == IDENTIFIER:
+                self.advance()  # TODO: might need to go back one token
+                if cur_token != "(" or cur_token != "." or \
+                        cur_token != "[":
+                    self.vm.write_push(self.st.kind_of(cur_token),
+                                       self.st.index_of(cur_token))
+                    return
+
+                elif self.jt.get_cur_token() == "[":
+                    # Write "[" Symbol
                     self.advance()
+                    self.compile_expression()
+                    self.vm.write_push(self.st.kind_of(cur_token), self.st.index_of(cur_token))
+                    self.vm.write_pop("pointer", 1)
+                    self.vm.write_push("that", 0)
+                    # Write "]" Symbol
 
-            if self.jt.get_cur_token() == "[":
-                # Write "[" Symbol
-                self.tags()
-                self.advance()
-                self.compile_expression()
+                elif self.jt.get_cur_token() == "(":
+                    # Write "(" Symbol
+                    self.advance()
+                    n_args = self.compile_expression_list()
+                    self.vm.write_call(cur_token, n_args)
+                    # Write ")" Symbol
 
-                # Write "]" Symbol
-                self.tags()
-                self.advance()
+                elif self.jt.get_cur_token() == ".":
+                    # Write "." Symbol
+                    def create_call(cur_token):
+                        cur_token += "."
+                        self.advance()
+                        cur_token += self.jt.get_cur_token()
+                        # Write "SubroutineName" Identifier
+                        self.advance()
+                        return cur_token
 
-            elif self.jt.get_cur_token() == "(":
-                # Write "(" Symbol
-                self.tags()
-                self.advance()
-                self.compile_expression_list()
+                    cur_token = create_call(cur_token)
+                    while self.jt.get_cur_token() == ".":
+                        cur_token = create_call(cur_token)
+                    # Write "(" Symbol
+                    self.advance()
+                    n_args = self.compile_expression_list()
+                    self.vm.write_call(cur_token, n_args)
+                    # Write ")" Symbol
 
-                # Write ")" Symbol
-                self.tags()
-                self.advance()
-
-            elif self.jt.get_cur_token() == ".":
-                # Write "." Symbol
-                self.tags()
-                self.advance()
-                # Write "SubroutineName" Identifier
-                self.tags()
-                self.advance()
-                # Write "(" Symbol
-                self.tags()
-                self.advance()
-                self.compile_expression_list()
-
-                # Write ")" Symbol
-                self.tags()
-                self.advance()
-
-        self.output_file.write("</term>" + LINE)
+        self.advance()
 
     def compile_expression_list(self):
         """Compiles a (possibly empty) comma-separated list of expressions."""
@@ -462,20 +468,15 @@ class CompilationEngine:
             while self.jt.get_cur_token() == ',':
                 # Write ','
                 self.advance()
-
                 self.compile_expression()
-
         # self.jt.advance()
         return param_count
 
     def compile_else(self):
         # writes "else"
-        self.tags()
         self.advance()
         # writes "{"
-        self.tags()
         self.jt.advance()
         self.compile_statements()
         # writes "}"
-        self.tags()
         self.jt.advance()
